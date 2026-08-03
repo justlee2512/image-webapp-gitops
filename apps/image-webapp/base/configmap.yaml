@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: image-webapp-config
+data:
+  PORT: "3000"
+  SESSION_IDLE_TIMEOUT_MS: "900000"
+  TRUST_PROXY: "true"
+  COOKIE_SECURE: "true"
+  MAX_ACCOUNTS: "5"
+  MAX_FILE_SIZE_MB: "30"
+  DB_POOL_MAX: "5"
+  DB_STATEMENT_TIMEOUT_MS: "120000"
+  MAX_CONCURRENT_UPLOADS: "1"
+  MAX_CONCURRENT_DOWNLOADS: "2"

@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: image-webapp
+resources:
+  - ../../base
+images:
+  - name: ghcr.io/justlee2512/image-webapp
+    newName: ghcr.io/justlee2512/image-webapp
+    newTag: bootstrap
+commonLabels:
+  app.kubernetes.io/environment: production

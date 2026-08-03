@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: image-webapp
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "35m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - image.chocomin.online
+      secretName: image-webapp-tls
+  rules:
+    - host: image.chocomin.online
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: image-webapp
+                port:
+                  name: http
