@@ -2,21 +2,14 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: image-webapp
+  namespace: image-webapp
   labels:
     app.kubernetes.io/name: image-webapp
-    app.kubernetes.io/component: web
-    app.kubernetes.io/part-of: image-webapp
-
 spec:
-  replicas: 2
-
-  revisionHistoryLimit: 5
+  replicas: 3
 
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+    type: Recreate
 
   selector:
     matchLabels:
@@ -26,7 +19,6 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: image-webapp
-        app.kubernetes.io/component: web
         app.kubernetes.io/part-of: image-webapp
 
     spec:
@@ -36,9 +28,128 @@ spec:
         seccompProfile:
           type: RuntimeDefault
 
-      # Chỉ bật phần này nếu GHCR image của anh đang để private.
-      # imagePullSecrets:
-      #   - name: ghcr-pull-secret
+      initContainers:
+        - name: check-database-schema
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: image-drive
+                  key: database-url
+
+            - name: DB_SCHEMA
+              valueFrom:
+                configMapKeyRef:
+                  name: image-webapp-config
+                  key: DB_SCHEMA
+
+          command:
+            - /bin/sh
+            - -ec
+
+          args:
+            - |
+              echo "Checking PostgreSQL connection and schema '${DB_SCHEMA}'..."
+
+              case "${DB_SCHEMA}" in
+                ""|*[!a-zA-Z0-9_]*)
+                  echo "ERROR: Invalid schema name '${DB_SCHEMA}'." >&2
+                  exit 1
+                  ;;
+              esac
+
+              echo "Testing PostgreSQL connection..."
+
+              psql "${DATABASE_URL}" \
+                --no-password \
+                --set=ON_ERROR_STOP=1 \
+                --command="
+                  SELECT
+                    current_database() AS database,
+                    current_user AS database_user,
+                    inet_server_addr() AS server_ip,
+                    inet_server_port() AS server_port;
+                "
+
+              schema_exists="$(
+                psql "${DATABASE_URL}" \
+                  --no-password \
+                  --set=ON_ERROR_STOP=1 \
+                  --tuples-only \
+                  --no-align \
+                  --command="
+                    SELECT EXISTS (
+                      SELECT 1
+                      FROM pg_namespace
+                      WHERE nspname = '${DB_SCHEMA}'
+                    );
+                  " | tr -d '[:space:]'
+              )"
+
+              if [ "${schema_exists}" != "t" ]; then
+                echo "ERROR: PostgreSQL schema '${DB_SCHEMA}' does not exist." >&2
+                exit 1
+              fi
+
+              missing_tables="$(
+                psql "${DATABASE_URL}" \
+                  --no-password \
+                  --set=ON_ERROR_STOP=1 \
+                  --tuples-only \
+                  --no-align \
+                  --command="
+                    SELECT COALESCE(string_agg(required_table, ','), '')
+                    FROM (
+                      VALUES
+                        ('users'),
+                        ('folders'),
+                        ('folder_shares'),
+                        ('images')
+                    ) AS required(required_table)
+                    WHERE to_regclass(
+                      '${DB_SCHEMA}.' || required_table
+                    ) IS NULL;
+                  " | tr -d '[:space:]'
+              )"
+
+              if [ -n "${missing_tables}" ]; then
+                echo "ERROR: Missing tables in schema '${DB_SCHEMA}': ${missing_tables}" >&2
+                exit 1
+              fi
+
+              PGOPTIONS="-c search_path=${DB_SCHEMA},public" \
+                psql "${DATABASE_URL}" \
+                  --no-password \
+                  --set=ON_ERROR_STOP=1 \
+                  --command="
+                    SELECT
+                      current_schema() AS current_schema,
+                      current_setting('search_path') AS search_path,
+                      1 AS query_ok;
+                  "
+
+              echo "PostgreSQL schema '${DB_SCHEMA}' is ready."
+
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
 
       containers:
         - name: image-webapp
@@ -54,64 +165,64 @@ spec:
             - configMapRef:
                 name: image-webapp-config
 
-            - secretRef:
-                name: image-webapp-secret
+          env:
+            - name: NODE_ENV
+              value: production
 
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 10001
-            runAsGroup: 10001
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: image-drive
+                  key: database-url
 
-            capabilities:
-              drop:
-                - ALL
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: image-drive
+                  key: session-secret
 
           startupProbe:
             httpGet:
-              path: /live
+              path: /health
               port: http
-              scheme: HTTP
-
-            initialDelaySeconds: 2
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 30
-            successThreshold: 1
 
           readinessProbe:
             httpGet:
               path: /health
               port: http
-              scheme: HTTP
-
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
-            successThreshold: 1
-
-          livenessProbe:
-            httpGet:
-              path: /live
-              port: http
-              scheme: HTTP
-
-            initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
-            successThreshold: 1
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
 
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
-
+              memory: 256Mi
             limits:
               cpu: "1"
               memory: 1Gi
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
 
           volumeMounts:
             - name: tmp
