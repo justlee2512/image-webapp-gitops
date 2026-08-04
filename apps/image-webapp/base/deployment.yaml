@@ -181,6 +181,12 @@ spec:
                   name: image-drive
                   key: session-secret
 
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: image-drive
+                  key: admin-password
+
           startupProbe:
             httpGet:
               path: /health
