@@ -154,7 +154,7 @@ spec:
       containers:
         - name: image-webapp
           image: ghcr.io/justlee2512/image-webapp:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
 
           ports:
             - name: http
