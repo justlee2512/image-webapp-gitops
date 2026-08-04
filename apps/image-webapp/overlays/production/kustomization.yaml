@@ -6,6 +6,6 @@ resources:
 images:
   - name: ghcr.io/justlee2512/image-webapp
     newName: ghcr.io/justlee2512/image-webapp
-    newTag: sha-25275ce2a3aee541cd4bb8a9f850c3ff0c0d4f22
+    newTag: sha-96f29f34ec32542d9cd58347618bbae0ee9768d9
 commonLabels:
   app.kubernetes.io/environment: production
