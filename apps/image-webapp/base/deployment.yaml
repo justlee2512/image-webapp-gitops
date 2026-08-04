@@ -9,7 +9,10 @@ spec:
   replicas: 3
 
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
 
   selector:
     matchLabels:
@@ -189,11 +192,11 @@ spec:
 
           startupProbe:
             httpGet:
-              path: /health
+              path: /live
               port: http
             periodSeconds: 5
             timeoutSeconds: 3
-            failureThreshold: 30
+            failureThreshold: 60
 
           readinessProbe:
             httpGet:
@@ -205,7 +208,7 @@ spec:
 
           livenessProbe:
             httpGet:
-              path: /health
+              path: /live
               port: http
             initialDelaySeconds: 30
             periodSeconds: 20
