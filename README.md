@@ -11,18 +11,22 @@ Argo CD là thành phần duy nhất thực hiện deploy vào Kubernetes.
 
 ## Cluster đích
 
-Đã kiểm tra ngày 14/11/2026 qua context `default`, API `192.168.2.150:6443`:
+Đã kiểm tra chỉ đọc ngày 15/11/2026 qua context `default`, API `192.168.2.150:6443`:
 
 - RKE2 `v1.37.2+rke2r1`: 2 control-plane và 2 worker, cả 4 node `Ready`.
 - Argo CD chạy trong namespace `argocd`.
-- IngressClass `traefik`; Service `kube-system/rke2-traefik`, NodePort
-  HTTP `30080`, HTTPS `30443`.
-- Cloudflare Tunnel có 2 replica, chuyển HTTP nội bộ tới Traefik.
+- IngressClass `traefik`; Service `kube-system/rke2-traefik` loại LoadBalancer,
+  VIP `192.168.2.148`, HTTP `80`, HTTPS `443`.
+- Traefik công bố địa chỉ Service qua `publishedService`; Ingress của app
+  đã có địa chỉ `192.168.2.148` trong status.
+- Cloudflare Tunnel phục vụ domain của app; `/health` qua HTTPS trả HTTP 200.
 - Chưa có StorageClass; app hiện dùng `emptyDir` cho `/tmp`, không yêu cầu PVC.
-- Chưa có namespace, Secret hoặc Argo CD Application của `image-webapp`.
+- Namespace, Deployment, Service, Ingress và Argo CD Application `image-webapp`
+  đã tồn tại. Deployment có 3/3 replica Ready; Application Synced / Healthy.
 
-Các manifest giữ nguyên 3 replica và image tag hiện tại. PostgreSQL
-`192.168.2.90:5432` là địa chỉ từ cấu hình cũ, chưa xác minh kết nối từ cluster mới.
+Các manifest giữ nguyên 3 replica và image tag hiện tại. Secret database/session
+được quản lý ngoài Git; địa chỉ PostgreSQL trong ví dụ bên dưới không phải cấu
+hình hạ tầng được repo này quản lý.
 
 ## Cấu trúc
 
@@ -33,23 +37,21 @@ argocd/application.yaml               Argo CD Application
 scripts/create-secret.sh              Tạo DB/session secret ngoài Git
 ```
 
-## 1. Push repository
-
-Tạo repository:
+## 1. Repository và phạm vi quản lý
 
 ```text
 justlee2512/image-webapp-gitops
 ```
 
-Sau đó:
+Repo đã tồn tại và Argo CD theo dõi nhánh `main`. Push lên `main` sẽ kích hoạt
+auto sync. Repo chỉ quản lý ứng dụng `image-webapp`, không quản lý Traefik,
+LoadBalancer, Cloudflare Tunnel hoặc ConfigMap cấu hình Argo CD.
+
+Kiểm tra manifest local trước khi đề xuất deploy:
 
 ```bash
-git init
-git branch -M main
-git add .
-git commit -m "Initial image-webapp GitOps manifests"
-git remote add origin https://github.com/justlee2512/image-webapp-gitops.git
-git push -u origin main
+kubectl kustomize apps/image-webapp/overlays/production
+git diff --check
 ```
 
 ## 2. Tạo application secret
@@ -90,19 +92,20 @@ image.chocomin.online
 ```
 
 Ingress nhận HTTP trên entrypoint `web` của Traefik. Để công khai qua
-Cloudflare Tunnel, thêm Published application route trong tunnel hiện có:
+Cloudflare Tunnel, cấu hình route cần giữ Host header của app. Origin nội bộ
+có thể dùng Service DNS ổn định của Traefik:
 
 ```text
 Hostname: image.chocomin.online
 Service:  http://rke2-traefik.kube-system.svc.cluster.local:80
 ```
 
-Tại thời điểm kiểm tra, tunnel chỉ có route cho Argo CD và Headlamp; chưa có
-route cho `image.chocomin.online`. Giữ Host header gốc để Traefik chọn đúng
-Ingress. HTTPS kết thúc tại Cloudflare, không cần TLS Secret trong namespace app
+Domain `image.chocomin.online` hiện hoạt động. Giữ Host header gốc để Traefik
+chọn đúng Ingress. HTTPS kết thúc tại Cloudflare, không cần TLS Secret trong namespace app
 cho đường đi này. Bật chuyển hướng HTTPS tại Cloudflare và đổi
 `COOKIE_SECURE: "true"` trong ConfigMap trước khi phục vụ production qua HTTPS.
-Giá trị hiện tại `false` cho phép kiểm tra HTTP nội bộ trước khi cấu hình tunnel.
+Giá trị trong repo hiện vẫn là `false`; việc đổi chính sách cookie cần được
+triển khai và kiểm tra đăng nhập riêng.
 
 Nếu đổi domain, sửa `apps/image-webapp/base/ingress.yaml` và route tương ứng.
 Các annotation NGINX cũ đã được bỏ vì controller là Traefik; chúng không áp dụng
@@ -118,10 +121,11 @@ Pipeline không chạy database migration. Trước deploy lần đầu hoặc k
 psql -h 192.168.2.90 -U YOUR_DB_USER -d webapp -f db/init.sql
 ```
 
-## 6. Tạo Argo CD Application
+## 6. Argo CD Application
 
-Push các thay đổi lên `main` và tạo Secret trước khi tạo Application, vì Argo CD
-đọc manifest từ Git và tự động sync ngay. Argo CD dùng namespace `argocd`:
+Application hiện đã tồn tại; không cần tạo lại cho mỗi lần cập nhật manifest.
+Lệnh dưới chỉ dành cho khởi tạo môi trường mới, sau khi đã tạo Secret và duyệt
+deploy. Argo CD dùng namespace `argocd`:
 
 ```bash
 kubectl apply -f argocd/application.yaml
@@ -139,23 +143,22 @@ kubectl -n image-webapp rollout status deployment/image-webapp
 
 ### Health của Ingress qua Cloudflare Tunnel
 
-Traefik dùng NodePort và các node không có External IP, nên dù đã bật
-`publishedService`, Ingress vẫn có `status.loadBalancer` rỗng. Argo CD mặc định
-đợi địa chỉ này và báo `Progressing` dù ứng dụng đã phục vụ bình thường.
+Traefik hiện dùng LoadBalancer và công bố VIP `192.168.2.148` vào
+`status.loadBalancer.ingress`. Ingress dùng health check mặc định của Argo CD,
+không cần annotation bỏ qua health, Lua tùy chỉnh hoặc thay đổi `argocd-cm`.
+Không khai báo `status` hay cố định VIP trong manifest app: controller quản lý
+trường này từ Service LoadBalancer của Traefik.
 
-Ingress của riêng `image-webapp` có annotation
-`argocd.argoproj.io/ignore-healthcheck: "true"` để không giữ health tổng của
-Application ở `Progressing` chỉ vì thiếu địa chỉ LoadBalancer. Deployment/pod
-và các probe `/health` vẫn được kiểm tra. Không cần sửa ConfigMap `argocd-cm`.
+Nếu Ingress lại `Progressing`, kiểm tra địa chỉ của Traefik Service và Ingress
+bằng các lệnh chỉ đọc:
 
-Annotation này chỉ ảnh hưởng health tổng của Application. Ingress riêng lẻ
-vẫn có thể hiện `Progressing` trên cây resource; đây không phải cách biến
-Ingress thành `Healthy` hay xác nhận Tunnel hoạt động. Khi giữ nguyên controller
-và health check mặc định của Argo CD, annotation này không loại bỏ biểu tượng
-Progressing của chính Ingress.
+```bash
+kubectl -n kube-system get service rke2-traefik -o wide
+kubectl -n image-webapp get ingress image-webapp -o yaml
+```
+
+Health của Deployment/pod vẫn dựa trên trạng thái rollout và các probe.
 Kiểm tra đường truy cập Tunnel riêng bằng `curl -fsS https://image.chocomin.online/health`.
-Nếu sau này dùng LoadBalancer có địa chỉ được công bố, bỏ annotation
-`ignore-healthcheck` để dùng lại health mặc định cho Ingress.
 
 ### Pipeline
 
