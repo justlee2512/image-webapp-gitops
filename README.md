@@ -143,12 +143,24 @@ Traefik dùng NodePort và các node không có External IP, nên dù đã bật
 `publishedService`, Ingress vẫn có `status.loadBalancer` rỗng. Argo CD mặc định
 đợi địa chỉ này và báo `Progressing` dù ứng dụng đã phục vụ bình thường.
 
-Ingress của app có annotation `argocd.argoproj.io/ignore-healthcheck: "true"`
-để loại riêng resource này khỏi health tổng của Application. Health của
-Deployment/pod và các probe `/health` vẫn được kiểm tra. Ingress có thể vẫn hiện
-`Progressing` trên cây resource; annotation không biến nó thành `Healthy`.
+Ingress có annotation `chocomin.online/ingress-health-mode: cloudflare-tunnel`.
+Custom health check trong `argocd/image-webapp-ingress-health.lua` đánh giá riêng
+Ingress `image-webapp/image-webapp`: đúng Traefik, hostname, entrypoint và backend
+thì `Healthy`, sai route thì `Degraded`. Ingress tham gia health tổng của app;
+không còn dùng `ignore-healthcheck`. Deployment/pod và probe vẫn được kiểm tra.
+
+Cài cấu hình cấp Argo CD trước khi sync manifest Ingress:
+
+```bash
+python3 scripts/configure-ingress-health.py
+```
+
+Script bổ sung block riêng vào `argocd-cm`, giữ nguyên health check hiện có
+(bao gồm portfolio), có thể chạy lại và chặn ghi đè khi ConfigMap đổi đồng thời.
+File Lua không tự được sync bởi Application này; cần chạy lại script khi sửa nó.
+Health này xác nhận cấu hình route, không chứng minh Tunnel đang hoạt động.
 Kiểm tra đường truy cập Tunnel riêng bằng `curl -fsS https://image.chocomin.online/health`.
-Nếu sau này dùng LoadBalancer có địa chỉ được công bố, bỏ annotation này.
+Nếu sau này dùng LoadBalancer có địa chỉ được công bố, bỏ annotation health-mode.
 
 ### Pipeline
 
