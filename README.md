@@ -137,6 +137,21 @@ kubectl -n image-webapp rollout status deployment/image-webapp
 
 ## 7. Luồng deploy
 
+### Health của Ingress qua Cloudflare Tunnel
+
+Traefik dùng NodePort và các node không có External IP, nên dù đã bật
+`publishedService`, Ingress vẫn có `status.loadBalancer` rỗng. Argo CD mặc định
+đợi địa chỉ này và báo `Progressing` dù ứng dụng đã phục vụ bình thường.
+
+Ingress của app có annotation `argocd.argoproj.io/ignore-healthcheck: "true"`
+để loại riêng resource này khỏi health tổng của Application. Health của
+Deployment/pod và các probe `/health` vẫn được kiểm tra. Ingress có thể vẫn hiện
+`Progressing` trên cây resource; annotation không biến nó thành `Healthy`.
+Kiểm tra đường truy cập Tunnel riêng bằng `curl -fsS https://image.chocomin.online/health`.
+Nếu sau này dùng LoadBalancer có địa chỉ được công bố, bỏ annotation này.
+
+### Pipeline
+
 ```text
 merge main
   -> GitHub Actions build image sha-<commit>
