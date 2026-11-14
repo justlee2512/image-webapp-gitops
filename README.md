@@ -143,24 +143,19 @@ Traefik dùng NodePort và các node không có External IP, nên dù đã bật
 `publishedService`, Ingress vẫn có `status.loadBalancer` rỗng. Argo CD mặc định
 đợi địa chỉ này và báo `Progressing` dù ứng dụng đã phục vụ bình thường.
 
-Ingress có annotation `chocomin.online/ingress-health-mode: cloudflare-tunnel`.
-Custom health check trong `argocd/image-webapp-ingress-health.lua` đánh giá riêng
-Ingress `image-webapp/image-webapp`: đúng Traefik, hostname, entrypoint và backend
-thì `Healthy`, sai route thì `Degraded`. Ingress tham gia health tổng của app;
-không còn dùng `ignore-healthcheck`. Deployment/pod và probe vẫn được kiểm tra.
+Ingress của riêng `image-webapp` có annotation
+`argocd.argoproj.io/ignore-healthcheck: "true"` để không giữ health tổng của
+Application ở `Progressing` chỉ vì thiếu địa chỉ LoadBalancer. Deployment/pod
+và các probe `/health` vẫn được kiểm tra. Không cần sửa ConfigMap `argocd-cm`.
 
-Cài cấu hình cấp Argo CD trước khi sync manifest Ingress:
-
-```bash
-python3 scripts/configure-ingress-health.py
-```
-
-Script bổ sung block riêng vào `argocd-cm`, giữ nguyên health check hiện có
-(bao gồm portfolio), có thể chạy lại và chặn ghi đè khi ConfigMap đổi đồng thời.
-File Lua không tự được sync bởi Application này; cần chạy lại script khi sửa nó.
-Health này xác nhận cấu hình route, không chứng minh Tunnel đang hoạt động.
+Annotation này chỉ ảnh hưởng health tổng của Application. Ingress riêng lẻ
+vẫn có thể hiện `Progressing` trên cây resource; đây không phải cách biến
+Ingress thành `Healthy` hay xác nhận Tunnel hoạt động. Khi giữ nguyên controller
+và health check mặc định của Argo CD, annotation này không loại bỏ biểu tượng
+Progressing của chính Ingress.
 Kiểm tra đường truy cập Tunnel riêng bằng `curl -fsS https://image.chocomin.online/health`.
-Nếu sau này dùng LoadBalancer có địa chỉ được công bố, bỏ annotation health-mode.
+Nếu sau này dùng LoadBalancer có địa chỉ được công bố, bỏ annotation
+`ignore-healthcheck` để dùng lại health mặc định cho Ingress.
 
 ### Pipeline
 

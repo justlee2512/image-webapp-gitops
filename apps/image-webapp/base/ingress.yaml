@@ -6,8 +6,9 @@ metadata:
   labels:
     app.kubernetes.io/name: image-webapp
   annotations:
-    # Cloudflare Tunnel reaches Traefik NodePort without a LoadBalancer address.
-    chocomin.online/ingress-health-mode: cloudflare-tunnel
+    # Tunnel + NodePort has no LoadBalancer address. Exclude only this Ingress
+    # from Application health; Deployment and Pod health checks remain enabled.
+    argocd.argoproj.io/ignore-healthcheck: "true"
     traefik.ingress.kubernetes.io/router.entrypoints: web
 spec:
   ingressClassName: traefik
